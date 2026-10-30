@@ -139,7 +139,7 @@ export async function createStreamKey(
       body: {
         snippet: { title: input.title },
         cdn: {
-          ingestionType: 'YOUTUBE',
+          ingestionType: 'rtmp', // enum in CdnSettings — "YOUTUBE" is rejected as invalid
           format: '1080p',
           resolution: '1080p',
           frameRate: '30fps',
