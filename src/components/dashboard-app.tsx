@@ -79,6 +79,16 @@ export function DashboardApp({ initial }: Props) {
         <ManagePanel onError={showToast} onCreateNew={() => setTab("create")} />
       )}
 
+      <p className="mt-8 text-center text-[11px] text-mut">
+        <a href="/privacy" className="underline">
+          Privacy Policy
+        </a>
+        <span className="mx-2">·</span>
+        <a href="/terms" className="underline">
+          Terms of Service
+        </a>
+      </p>
+
       <nav className="safe-bottom fixed inset-x-0 bottom-0 z-40 mx-auto flex w-full max-w-md gap-2 border-t border-line bg-panel/95 px-4 pt-2 backdrop-blur">
         {(
           [

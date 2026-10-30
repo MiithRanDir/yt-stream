@@ -83,6 +83,15 @@ export function LoginCard({
       <p className="mt-6 text-center text-xs text-mut">
         ใช้กับบัญชี Google ส่วนตัวของคุณเท่านั้น · เชื่อมต่อผ่าน YouTube Data API
       </p>
+      <p className="mt-2 text-center text-xs">
+        <a href="/privacy" className="text-mut underline">
+          Privacy Policy
+        </a>
+        <span className="mx-2 text-mut">·</span>
+        <a href="/terms" className="text-mut underline">
+          Terms of Service
+        </a>
+      </p>
     </main>
   );
 }
