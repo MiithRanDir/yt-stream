@@ -3,9 +3,15 @@
 // with a Thai user-facing message for known failure reasons.
 
 import { ENV } from './env';
-import type { BroadcastSummary, PrivacyStatus, StreamKeyInfo } from './types';
+import type {
+  BroadcastStats,
+  BroadcastSummary,
+  OrphanStream,
+  PrivacyStatus,
+  StreamKeyInfo,
+} from './types';
 
-export type { BroadcastSummary, PrivacyStatus, StreamKeyInfo };
+export type { BroadcastSummary, PrivacyStatus, StreamKeyInfo, OrphanStream, BroadcastStats };
 
 const YT_BASE = 'https://www.googleapis.com/youtube/v3';
 
@@ -351,4 +357,115 @@ export async function findBroadcast(
 ): Promise<BroadcastSummary | null> {
   const items = await listBroadcasts(accessToken);
   return items.find((item) => item.broadcastId === broadcastId) ?? null;
+}
+
+/**
+ * Streams that no broadcast references (leftovers from failed create attempts
+ * or deleted broadcasts). Streams whose ingest is currently active are never
+ * listed — something is live on them.
+ */
+type PagedItems<T> = { items?: T[]; nextPageToken?: string };
+
+/** Fetches every page of a list endpoint (maxResults=50) into one array. */
+async function listAll<T>(
+  accessToken: string,
+  path: string,
+  query: Record<string, string | number | undefined>,
+): Promise<T[]> {
+  const all: T[] = [];
+  let pageToken: string | undefined;
+  do {
+    const page = await ytFetch<PagedItems<T>>(accessToken, path, {
+      query: { ...query, maxResults: 50, pageToken },
+    });
+    all.push(...(page.items ?? []));
+    pageToken = page.nextPageToken;
+  } while (pageToken);
+  return all;
+}
+
+export async function listOrphanStreams(accessToken: string): Promise<OrphanStream[]> {
+  const broadcasts = await listAll<{
+    contentDetails?: { boundStreamId?: string; stream?: { id?: string } };
+  }>(accessToken, '/liveBroadcasts', { part: 'contentDetails', mine: 'true' });
+  const boundStreamIds = new Set<string>();
+  for (const broadcast of broadcasts) {
+    const id = broadcast.contentDetails?.stream?.id ?? broadcast.contentDetails?.boundStreamId;
+    if (id) boundStreamIds.add(id);
+  }
+
+  const streams = await listAll<{
+    id: string;
+    snippet?: { title?: string; publishedAt?: string };
+    status?: { streamStatus?: string };
+  }>(accessToken, '/liveStreams', { part: 'snippet,status', mine: 'true' });
+
+  const orphans: OrphanStream[] = [];
+  for (const stream of streams) {
+    if (boundStreamIds.has(stream.id)) continue;
+    if (stream.status?.streamStatus === 'active') continue;
+    orphans.push({
+      streamId: stream.id,
+      title: stream.snippet?.title ?? '(ไม่มีชื่อ)',
+      createdAt: stream.snippet?.publishedAt ?? null,
+      streamStatus: stream.status?.streamStatus ?? 'unknown',
+    });
+  }
+  return orphans;
+}
+
+/** Deletes the given streams, skipping (not failing on) individual errors. */
+export async function deleteStreams(
+  accessToken: string,
+  ids: string[],
+): Promise<{ deleted: number; failed: number }> {
+  let deleted = 0;
+  let failed = 0;
+  for (const id of ids) {
+    try {
+      await ytFetch(accessToken, '/liveStreams', { method: 'DELETE', query: { id } });
+      deleted += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  return { deleted, failed };
+}
+
+/**
+ * Viewer totals + start time for one broadcast. The broadcast's video id is
+ * parsed from player.embedHtml because liveBroadcasts has no videoId field;
+ * before the stream actually starts there is no video yet (nulls returned).
+ */
+export async function getBroadcastStats(
+  accessToken: string,
+  broadcastId: string,
+): Promise<BroadcastStats> {
+  const data = await ytFetch<{
+    items?: Array<{ status?: { broadcastStatus?: string }; player?: { embedHtml?: string } }>;
+  }>(accessToken, '/liveBroadcasts', { query: { part: 'status,player', id: broadcastId } });
+  const broadcast = data.items?.[0];
+  if (!broadcast) {
+    throw new YouTubeError(404, 'notFound', 'ไม่พบไลฟ์นี้บนแชนแนลของคุณ');
+  }
+  const status = broadcast.status?.broadcastStatus ?? 'unknown';
+  const videoId = broadcast.player?.embedHtml?.match(/embed\/([A-Za-z0-9_-]{6,20})/)?.[1] ?? null;
+  if (!videoId) {
+    return { videoId: null, viewers: null, startedAt: null, broadcastStatus: status };
+  }
+  const videos = await ytFetch<{
+    items?: Array<{
+      statistics?: { viewCount?: string };
+      liveStreamingDetails?: { startDateTime?: string };
+    }>;
+  }>(accessToken, '/videos', {
+    query: { part: 'statistics,liveStreamingDetails', id: videoId },
+  });
+  const video = videos.items?.[0];
+  return {
+    videoId,
+    viewers: video?.statistics?.viewCount ? Number(video.statistics.viewCount) : null,
+    startedAt: video?.liveStreamingDetails?.startDateTime ?? null,
+    broadcastStatus: status,
+  };
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, errorMessage } from "@/lib/client-api";
-import type { BroadcastSummary } from "@/lib/types";
+import type { BroadcastStats, BroadcastSummary, OrphanStream } from "@/lib/types";
 import { Badge, CopyField, Modal, Spinner } from "./ui";
 
 type Props = {
@@ -34,6 +34,7 @@ export function ManagePanel({ onError, onCreateNew }: Props) {
   const [items, setItems] = useState<BroadcastSummary[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [orphansOpen, setOrphansOpen] = useState(false);
 
   // ponytail: state updates only happen after an await so the initial-load
   // effect never triggers a cascading render (react-hooks/set-state-in-effect).
@@ -92,16 +93,25 @@ export function ManagePanel({ onError, onCreateNew }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-mut">พบ {items.length} ไลฟ์</p>
-        <button
-          type="button"
-          onClick={manualRefresh}
-          disabled={refreshing}
-          className="rounded-xl border border-line bg-panel px-3 py-1.5 text-xs disabled:opacity-50"
-        >
-          {refreshing ? <Spinner /> : "รีเฟรช"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setOrphansOpen(true)}
+            className="rounded-xl border border-line bg-panel px-3 py-1.5 text-xs"
+          >
+            กวาด stream ค้าง
+          </button>
+          <button
+            type="button"
+            onClick={manualRefresh}
+            disabled={refreshing}
+            className="rounded-xl border border-line bg-panel px-3 py-1.5 text-xs disabled:opacity-50"
+          >
+            {refreshing ? <Spinner /> : "รีเฟรช"}
+          </button>
+        </div>
       </div>
 
       {sorted.length === 0 && (
@@ -120,6 +130,14 @@ export function ManagePanel({ onError, onCreateNew }: Props) {
       {sorted.map((item) => (
         <BroadcastCard key={item.broadcastId} item={item} onChanged={manualRefresh} onError={onError} />
       ))}
+
+      <OrphanCleanupModal
+        key={orphansOpen ? "orphans-open" : "orphans-closed"}
+        open={orphansOpen}
+        onClose={() => setOrphansOpen(false)}
+        onError={onError}
+        onDone={onError}
+      />
     </div>
   );
 }
@@ -137,6 +155,7 @@ function BroadcastCard({
   const [confirming, setConfirming] = useState<"stop" | "delete" | null>(null);
   const [renameOpen, setRenameOpen] = useState(false);
   const [keyOpen, setKeyOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
   const [keyInfo, setKeyInfo] = useState<{ ingestUrl: string; streamKey: string } | null>(null);
   const [keyLoading, setKeyLoading] = useState(false);
 
@@ -256,6 +275,13 @@ function BroadcastCard({
             "ลบคีย์"
           )}
         </button>
+        <button
+          type="button"
+          onClick={() => setStatsOpen(true)}
+          className="col-span-2 rounded-xl bg-panel-2 px-3 py-2.5"
+        >
+          📊 สถิติผู้ชม / เวลาไลฟ์
+        </button>
       </div>
 
       {/* key toggles remount the modal so its form starts from the latest title */}
@@ -274,6 +300,14 @@ function BroadcastCard({
         info={keyInfo}
         loading={keyLoading}
         onClose={() => setKeyOpen(false)}
+      />
+      <StatsModal
+        key={statsOpen ? "stats-open" : "stats-closed"}
+        open={statsOpen}
+        broadcastId={item.broadcastId}
+        title={item.title}
+        onClose={() => setStatsOpen(false)}
+        onError={onError}
       />
     </article>
   );
@@ -371,6 +405,197 @@ function KeyModal({
       )}
       {!loading && !info && (
         <p className="py-4 text-sm text-mut">โหลดคีย์ไม่สำเร็จ — ปิดแล้วกดดูคีย์ใหม่อีกครั้ง</p>
+      )}
+    </Modal>
+  );
+}
+
+function formatDuration(startedAt: string): string {
+  const ms = Date.now() - new Date(startedAt).getTime();
+  if (Number.isNaN(ms) || ms < 0) return "—";
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+}
+
+function StatsModal({
+  open,
+  broadcastId,
+  title,
+  onClose,
+  onError,
+}: {
+  open: boolean;
+  broadcastId: string;
+  title: string;
+  onClose: () => void;
+  onError: (message: string) => void;
+}) {
+  const [stats, setStats] = useState<BroadcastStats | null>(null);
+  const [, setTick] = useState(0); // re-render to advance the live duration clock
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const load = () => {
+      apiFetch<BroadcastStats>(`/api/streams/${broadcastId}/stats`).then(
+        (data) => {
+          if (!cancelled) setStats(data);
+        },
+        (err) => {
+          if (!cancelled) onError(errorMessage(err));
+        },
+      );
+    };
+    load();
+    const poll = window.setInterval(load, 30000); // refresh viewers every 30s
+    const clock = window.setInterval(() => setTick((t) => t + 1), 1000); // live timer
+    return () => {
+      cancelled = true;
+      window.clearInterval(poll);
+      window.clearInterval(clock);
+    };
+  }, [open, broadcastId, onError]);
+
+  const isLive = LIVEISH.has(stats?.broadcastStatus ?? "");
+  const meta = STATUS_META[stats?.broadcastStatus ?? ""] ?? { label: stats?.broadcastStatus ?? "" };
+
+  return (
+    <Modal open={open} title={`สถิติ · ${title}`} onClose={onClose}>
+      {stats === null && (
+        <div className="flex items-center gap-2 py-6 text-sm text-mut">
+          <Spinner /> กำลังโหลดสถิติ…
+        </div>
+      )}
+      {stats && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-xs text-mut">
+            {isLive && <span className="live-dot size-2 rounded-full bg-live" />}
+            สถานะ: {meta.label || "—"}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-2xl border border-line bg-app px-4 py-3">
+              <p className="text-xs text-mut">ยอดวิวสะสม</p>
+              <p className="mt-1 text-2xl font-bold">
+                {stats.viewers != null ? stats.viewers.toLocaleString("th-TH") : "—"}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-line bg-app px-4 py-3">
+              <p className="text-xs text-mut">{isLive ? "เวลาไลฟ์ (สด)" : "เวลาไลฟ์"}</p>
+              <p className="mt-1 font-mono text-2xl font-bold tabular-nums">
+                {stats.startedAt ? formatDuration(stats.startedAt) : "—"}
+              </p>
+            </div>
+          </div>
+          {stats.startedAt && (
+            <p className="text-xs text-mut">
+              เริ่มเมื่อ:{" "}
+              {new Date(stats.startedAt).toLocaleString("th-TH", {
+                dateStyle: "medium",
+                timeStyle: "short",
+              })}
+            </p>
+          )}
+          {!stats.videoId && (
+            <p className="text-xs text-warn">
+              ยังไม่มีวิดีโอสำหรับไลฟ์นี้ (ยังไม่เริ่มสตรีม) — ตัวเลขจะขึ้นเมื่อไลฟ์เริ่มจริง
+            </p>
+          )}
+          <p className="text-[11px] text-mut">อัปเดตอัตโนมัติทุก 30 วินาที</p>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function OrphanCleanupModal({
+  open,
+  onClose,
+  onError,
+  onDone,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onError: (message: string) => void;
+  onDone: (message: string) => void;
+}) {
+  const [orphans, setOrphans] = useState<OrphanStream[] | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    apiFetch<OrphanStream[]>("/api/streams/orphans")
+      .then((data) => {
+        if (!cancelled) setOrphans(data);
+      })
+      .catch((err) => {
+        if (!cancelled) onError(errorMessage(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, onError]);
+
+  async function deleteAll() {
+    if (!orphans?.length || deleting) return;
+    setDeleting(true);
+    try {
+      const ids = orphans.map((o) => o.streamId);
+      const res = await apiFetch<{ deleted: number; failed: number }>("/api/streams/orphans", {
+        method: "DELETE",
+        body: JSON.stringify({ ids }),
+      });
+      onDone(`กวาดเสร็จแล้ว: ลบ ${res.deleted} ตัว${res.failed ? `, ไม่สำเร็จ ${res.failed}` : ""}`);
+      setOrphans([]);
+    } catch (err) {
+      onError(errorMessage(err));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <Modal open={open} title="Stream ที่ไม่ผูกกับไลฟ์ (ค้าง)" onClose={onClose}>
+      <p className="mb-3 text-xs text-mut">
+        ค้างจากครั้งที่สร้างไม่สำเร็จ หรือไลฟ์ถูกลบไปแล้ว — ลบทิ้งได้ปลอดภัย (ไม่กระทบไลฟ์ที่ยังมีอยู่)
+      </p>
+      {orphans === null && (
+        <div className="flex items-center gap-2 py-6 text-sm text-mut">
+          <Spinner /> กำลังค้นหา…
+        </div>
+      )}
+      {orphans && orphans.length === 0 && (
+        <p className="rounded-2xl border border-line bg-app px-4 py-3 text-sm text-ok">
+          ไม่มี stream ค้าง — สะอาดเรียบร้อย ✔
+        </p>
+      )}
+      {orphans && orphans.length > 0 && (
+        <>
+          <ul className="max-h-64 space-y-2 overflow-y-auto">
+            {orphans.map((o) => (
+              <li key={o.streamId} className="rounded-2xl border border-line bg-app px-3 py-2 text-xs">
+                <p className="truncate font-semibold">{o.title}</p>
+                <p className="text-mut">
+                  {o.createdAt
+                    ? new Date(o.createdAt).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" })
+                    : "ไม่ทราบเวลา"} · {o.streamStatus}
+                </p>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            onClick={deleteAll}
+            disabled={deleting}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-live px-4 py-3.5 text-sm font-bold text-white disabled:opacity-40"
+          >
+            {deleting ? <Spinner /> : `ลบทั้งหมด ${orphans.length} ตัว`}
+          </button>
+        </>
       )}
     </Modal>
   );

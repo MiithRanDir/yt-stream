@@ -30,3 +30,17 @@ export type MeData = {
 export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: string };
+
+export type OrphanStream = {
+  streamId: string;
+  title: string;
+  createdAt: string | null;
+  streamStatus: string;
+};
+
+export type BroadcastStats = {
+  videoId: string | null;
+  viewers: number | null;
+  startedAt: string | null;
+  broadcastStatus: string;
+};
