@@ -126,11 +126,21 @@ export async function getChannel(accessToken: string) {
  * stream key. enableAutoStart means YouTube flips the broadcast to "live"
  * automatically as soon as RTMP input arrives — no extra button needed.
  */
+type YtCdn = {
+  ingestUrl?: string;
+  ingestionInfo?: { ingestionUrl?: string; streamId?: string; channelId?: string };
+};
+
+/** Ingest URL lives in cdn.ingestUrl for RTMP streams, cdn.ingestionInfo for others. */
+function findIngestUrl(cdn?: YtCdn): string | null {
+  return cdn?.ingestUrl ?? cdn?.ingestionInfo?.ingestionUrl ?? null;
+}
+
 export async function createStreamKey(
   accessToken: string,
   input: { title: string; privacy: PrivacyStatus },
 ): Promise<StreamKeyInfo> {
-  const stream = await ytFetch<{ id: string; cdn?: { ingestUrl?: string } }>(
+  const stream = await ytFetch<{ id: string; cdn?: YtCdn }>(
     accessToken,
     '/liveStreams',
     {
@@ -147,9 +157,23 @@ export async function createStreamKey(
       },
     },
   );
-  const ingestUrl = stream.cdn?.ingestUrl;
+
+  let ingestUrl = findIngestUrl(stream.cdn);
   if (!ingestUrl) {
-    throw new YouTubeError(502, 'missingIngestUrl', 'YouTube ไม่ส่ง stream URL กลับมา — ลองใหม่อีกครั้ง');
+    // Some insert responses omit cdn fields — re-read the created stream.
+    const refetch = await ytFetch<{ items?: Array<{ cdn?: YtCdn }> }>(
+      accessToken,
+      '/liveStreams',
+      { query: { part: 'cdn', id: stream.id } },
+    );
+    ingestUrl = findIngestUrl(refetch.items?.[0]?.cdn);
+  }
+  if (!ingestUrl) {
+    throw new YouTubeError(
+      502,
+      'missingIngestUrl',
+      `YouTube ไม่ส่ง stream URL กลับมา — cdn ที่ได้: ${JSON.stringify(stream.cdn ?? {}).slice(0, 200)}`,
+    );
   }
 
   const broadcast = await ytFetch<{ id: string }>(accessToken, '/liveBroadcasts', {
@@ -227,9 +251,9 @@ export async function getBroadcastStreamKey(
   streamId: string,
 ): Promise<{ ingestUrl: string; streamKey: string }> {
   const data = await ytFetch<{
-    items?: Array<{ cdn?: { ingestUrl?: string } }>;
+    items?: Array<{ cdn?: YtCdn }>;
   }>(accessToken, '/liveStreams', { query: { part: 'cdn', id: streamId } });
-  const ingestUrl = data.items?.[0]?.cdn?.ingestUrl;
+  const ingestUrl = findIngestUrl(data.items?.[0]?.cdn);
   if (!ingestUrl) {
     throw new YouTubeError(404, 'streamNotFound', 'ไม่พบสตรีมของไลฟ์นี้ (ถูกลบไปแล้ว?)');
   }
