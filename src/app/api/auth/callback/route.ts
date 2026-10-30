@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ENV } from '@/lib/env';
 import { decodeIdToken, exchangeCodeForTokens } from '@/lib/oauth';
 import { sessionCookieOptions, STATE_COOKIE, type SessionData } from '@/lib/session';
-import { getChannel } from '@/lib/youtube';
+import { getChannel, YouTubeError } from '@/lib/youtube';
 
 /** OAuth redirect target: validates state, exchanges code, creates session. */
 export async function GET(req: NextRequest) {
-  const fail = (reason: string) =>
-    NextResponse.redirect(`${ENV.appUrl}/?error=${reason}`);
+  const fail = (reason: string, detail?: string) => {
+    const q = new URLSearchParams({ error: reason });
+    if (detail) q.set('detail', detail.slice(0, 300));
+    return NextResponse.redirect(`${ENV.appUrl}/?${q.toString()}`);
+  };
 
   const { code, state, error } = Object.fromEntries(req.nextUrl.searchParams) as {
     code?: string;
@@ -38,7 +41,13 @@ export async function GET(req: NextRequest) {
     };
   } catch (err) {
     console.error('[auth/callback]', err);
-    return fail('youtube');
+    const detail =
+      err instanceof YouTubeError
+        ? `${err.reason}: ${err.message}`
+        : err instanceof Error
+          ? err.message
+          : String(err);
+    return fail('youtube', detail);
   }
 
   const res = NextResponse.redirect(`${ENV.appUrl}/dashboard`);

@@ -15,9 +15,11 @@ const ERROR_MESSAGES: Record<string, string> = {
 export function LoginCard({
   configured,
   errorCode,
+  errorDetail,
 }: {
   configured: boolean;
   errorCode: string | null;
+  errorDetail?: string | null;
 }) {
   const error = errorCode
     ? (ERROR_MESSAGES[errorCode] ?? `เกิดข้อผิดพลาด (${errorCode})`)
@@ -55,6 +57,11 @@ export function LoginCard({
       {error && (
         <div className="mb-4 rounded-2xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm text-warn">
           {error}
+          {errorDetail && (
+            <p className="mt-1 break-words font-mono text-[11px] text-warn/80">
+              {errorDetail}
+            </p>
+          )}
         </div>
       )}
 

@@ -9,6 +9,12 @@ export const instant = false;
 export default async function Home({ searchParams }: PageProps<"/">) {
   const session = await readSessionFromStore();
   if (session) redirect("/dashboard");
-  const { error } = await searchParams;
-  return <LoginCard configured={googleConfigured} errorCode={typeof error === "string" ? error : null} />;
+  const { error, detail } = await searchParams;
+  return (
+    <LoginCard
+      configured={googleConfigured}
+      errorCode={typeof error === "string" ? error : null}
+      errorDetail={typeof detail === "string" ? detail : null}
+    />
+  );
 }
