@@ -1,6 +1,6 @@
 # 🗃 Graphify — yt-stream
 
-> แผนที่โครงสร้างโค้ด (source of truth ของ architecture) — อัปเดตล่าสุด: 2026-10-30 (initial build)
+> แผนที่โครงสร้างโค้ด (source of truth ของ architecture) — อัปเดตล่าสุด: 2026-10-30 (v2: orphan cleanup + stats)
 
 ## ภาพใหญ่
 
@@ -30,6 +30,8 @@ Next.js 16 App Router (Vercel)
 | หยุดไลฟ์ | `POST /api/streams/[id]/stop` → liveBroadcasts.transition(complete) |
 | ลบคีย์ | `DELETE /api/streams/[id]` → liveBroadcasts.delete + liveStreams.delete(best-effort) |
 | ดูคีย์ | `GET /api/streams/[id]/key` → findBroadcast → liveStreams.list(cdn) → ingestUrl |
+| สถิติไลฟ์ | StatsModal (poll 30s) → `GET /api/streams/[id]/stats` → getBroadcastStats: liveBroadcasts.list(player) → parse videoId จาก embedHtml → videos.list(statistics,liveStreamingDetails) |
+| กวาด stream ค้าง | OrphanCleanupModal → `GET /api/streams/orphans` → listOrphanStreams (listAll broadcasts+streams, ข้าม active) → `DELETE /api/streams/orphans` → deleteStreams ทีละตัว |
 
 ## File Map
 
@@ -51,11 +53,11 @@ scripts/gen-icons.mjs sharp: app-icon.svg → PNG (npm run icons)
 - แอปสถานะ Testing → ใช้ได้เฉพาะ test users ≤ 100 (ผ่าน); จะ publish ให้คนอื่น = ต้อง OAuth verification
 - สร้างคีย์ 1 ครั้ง ≈ quota 102 units/วัน
 - ช่องต้องมี live eligibility ก่อน — API จะ return `liveStreamingNotEnabled` (map เป็นไทยแล้ว)
-- `cdn` ที่ส่งตอน liveStreams.insert = {format, resolution, frameRate, ingestionType:YOUTUBE} — docs เก่า/ใหม่ขัดกันเรื่อง required fields; ถ้าจริงมี invalid value ให้ดู error message ที่ map ไว้
+- **verify live แล้ว (30/10/26):** liveStreams.insert ต้องใช้ `ingestionType:'rtmp'` ('YOUTUBE' โดน enum ปฏิเสธ) และ key ไม่ได้อยู่ที่ `cdn.ingestUrl` แต่อยู่ใน `cdn.ingestionInfo.{streamName=key, ingestionAddress=server}` — resolver: `findIngestUrl()`
 - Rename ไม่ได้ตอนสถานะ live (broadcastUpdateLiveBroadcastNotAllowed)
 - Stream key ถูก YouTube rotate หลังจบไลฟ์แต่ละครั้ง — UI เตือนอยู่แล้ว (ปุ่ม ดูคีย์ ดึงค่าสดๆ)
 
-## Pattern ที่โปรเจกต์นี้ใช้ (ต้องรักษาความ一致的)
+## Pattern ที่โปรเจกต์นี้ใช้ (ต้องรักษาความสม่ำเสมอ)
 
 - API ทุกตัวตอบ `ApiResult<T>` = {ok,data}|{ok,error(ภาษาไทย)} → client `apiFetch` throw error.message
 - Error ฝั่ง Google ห้าม raw pass — ต้องผ่าน `explain()` ใน youtube.ts ก่อน
