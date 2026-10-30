@@ -128,12 +128,32 @@ export async function getChannel(accessToken: string) {
  */
 type YtCdn = {
   ingestUrl?: string;
-  ingestionInfo?: { ingestionUrl?: string; streamId?: string; channelId?: string };
+  ingestionInfo?: {
+    ingestionUrl?: string;
+    ingestionAddress?: string;
+    backupIngestionAddress?: string;
+    streamName?: string;
+    streamId?: string;
+    channelId?: string;
+  };
 };
 
-/** Ingest URL lives in cdn.ingestUrl for RTMP streams, cdn.ingestionInfo for others. */
+/**
+ * Ingest URL shapes seen from the live API:
+ *  - cdn.ingestUrl (classic, key as last path segment)
+ *  - cdn.ingestionInfo.ingestionUrl
+ *  - cdn.ingestionInfo.{ingestionAddress, streamName} — current YouTube Studio
+ *    style where streamName IS the key and the address has no key appended.
+ */
 function findIngestUrl(cdn?: YtCdn): string | null {
-  return cdn?.ingestUrl ?? cdn?.ingestionInfo?.ingestionUrl ?? null;
+  if (cdn?.ingestUrl) return cdn.ingestUrl;
+  const info = cdn?.ingestionInfo;
+  if (!info) return null;
+  if (info.ingestionUrl) return info.ingestionUrl;
+  if (info.ingestionAddress && info.streamName) {
+    return `${info.ingestionAddress}/${info.streamName}`;
+  }
+  return null;
 }
 
 export async function createStreamKey(
