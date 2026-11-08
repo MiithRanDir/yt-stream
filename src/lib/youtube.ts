@@ -2,7 +2,6 @@
 // Every function takes a fresh OAuth access token and throws YouTubeError
 // with a Thai user-facing message for known failure reasons.
 
-import { ENV } from './env';
 import type {
   BroadcastStats,
   BroadcastSummary,
@@ -208,7 +207,7 @@ export async function createStreamKey(
     body: {
       snippet: {
         title: input.title,
-        description: `สร้างผ่าน YT Stream Key (${ENV.appUrl})`,
+        description: 'สร้างผ่าน YT Stream Key',
         scheduledStartTime: new Date().toISOString(),
       },
       status: { privacyStatus: input.privacy },
