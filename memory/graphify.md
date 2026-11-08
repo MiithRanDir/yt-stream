@@ -30,7 +30,7 @@ Next.js 16 App Router (Vercel)
 | หยุดไลฟ์ | `POST /api/streams/[id]/stop` → liveBroadcasts.transition(complete) |
 | ลบคีย์ | `DELETE /api/streams/[id]` → liveBroadcasts.delete + liveStreams.delete(best-effort) |
 | ดูคีย์ | `GET /api/streams/[id]/key` → findBroadcast → liveStreams.list(cdn) → ingestUrl |
-| สถิติไลฟ์ | StatsModal (poll 30s) → `GET /api/streams/[id]/stats` → getBroadcastStats: liveBroadcasts.list(player) → parse videoId จาก embedHtml → videos.list(statistics,liveStreamingDetails) |
+| สถิติไลฟ์ | StatsModal (poll 30s) → `GET /api/streams/[id]/stats` → getBroadcastStats: liveBroadcasts.list(status) → videoId = broadcastId → videos.list(statistics,liveStreamingDetails). หมายเหตุ: 2026-11-08 YouTube ถอด `player` part ออกจาก liveBroadcasts และหยุดส่ง `status.broadcastStatus` (เหลือ `lifeCycleStatus`) — normalizeBroadcastStatus() แปลง created→upcoming, complete→completed |
 | กวาด stream ค้าง | OrphanCleanupModal → `GET /api/streams/orphans` → listOrphanStreams (listAll broadcasts+streams, ข้าม active) → `DELETE /api/streams/orphans` → deleteStreams ทีละตัว |
 
 ## File Map
