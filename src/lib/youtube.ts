@@ -265,10 +265,25 @@ export async function listBroadcasts(accessToken: string): Promise<BroadcastSumm
       null,
     title: item.snippet?.title ?? '(ไม่มีชื่อ)',
     privacy: item.status?.privacyStatus ?? 'unknown',
-    broadcastStatus: item.status?.broadcastStatus ?? 'unknown',
+    broadcastStatus: normalizeBroadcastStatus(item.status),
     scheduledStartTime: item.snippet?.scheduledStartTime ?? null,
     createdAt: item.snippet?.publishedAt ?? null,
   }));
+}
+
+/**
+ * YouTube stopped returning status.broadcastStatus; lifeCycleStatus carries the
+ * same states (created/live/complete/…). Map to the UI's vocabulary, keeping
+ * broadcastStatus as a fallback for old data.
+ */
+function normalizeBroadcastStatus(
+  status?: { lifeCycleStatus?: string; broadcastStatus?: string } | undefined,
+): string {
+  const raw = status?.lifeCycleStatus ?? status?.broadcastStatus ?? 'unknown';
+  if (raw === 'created') return 'upcoming';
+  if (raw === 'complete') return 'completed';
+  if (raw === 'testStarting') return 'testing';
+  return raw;
 }
 
 export async function getBroadcastStreamKey(
@@ -432,26 +447,24 @@ export async function deleteStreams(
 }
 
 /**
- * Viewer totals + start time for one broadcast. The broadcast's video id is
- * parsed from player.embedHtml because liveBroadcasts has no videoId field;
- * before the stream actually starts there is no video yet (nulls returned).
+ * Viewer totals + start time for one broadcast. A broadcast's id IS its video
+ * id (the old player-embedHtml trick died when YouTube dropped the `player`
+ * part); before the stream actually starts there is no video yet (nulls
+ * returned).
  */
 export async function getBroadcastStats(
   accessToken: string,
   broadcastId: string,
 ): Promise<BroadcastStats> {
   const data = await ytFetch<{
-    items?: Array<{ status?: { broadcastStatus?: string }; player?: { embedHtml?: string } }>;
-  }>(accessToken, '/liveBroadcasts', { query: { part: 'status,player', id: broadcastId } });
+    items?: Array<{ status?: { lifeCycleStatus?: string; broadcastStatus?: string } }>;
+  }>(accessToken, '/liveBroadcasts', { query: { part: 'status', id: broadcastId } });
   const broadcast = data.items?.[0];
   if (!broadcast) {
     throw new YouTubeError(404, 'notFound', 'ไม่พบไลฟ์นี้บนแชนแนลของคุณ');
   }
-  const status = broadcast.status?.broadcastStatus ?? 'unknown';
-  const videoId = broadcast.player?.embedHtml?.match(/embed\/([A-Za-z0-9_-]{6,20})/)?.[1] ?? null;
-  if (!videoId) {
-    return { videoId: null, viewers: null, startedAt: null, broadcastStatus: status };
-  }
+  const status = normalizeBroadcastStatus(broadcast.status);
+  const videoId = broadcastId; // a liveBroadcast's id is also its video id
   const videos = await ytFetch<{
     items?: Array<{
       statistics?: { viewCount?: string };
